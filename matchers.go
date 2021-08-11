@@ -11,6 +11,8 @@ import (
 	gtypes "github.com/onsi/gomega/types"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -122,8 +124,37 @@ func HaveNamespace(namespace string) gtypes.GomegaMatcher {
 	return &NamespaceMatcher{Namespace: namespace}
 }
 
+type ImageMatcher struct {
+	Image string
+}
+
+func (o ImageMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case corev1.Container:
+		return t.Image == o.Image, nil
+	default:
+		return false, fmt.Errorf(
+			"%w %T in ImageMatcher (allowed types: corev1.Container)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (o ImageMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have image " + o.Image
+}
+
+func (o ImageMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have image " + o.Image
+}
+
+func HaveImage(image string) gtypes.GomegaMatcher {
+	return &ImageMatcher{Image: image}
+}
+
 type OwnershipMatcher struct {
-	owner client.Object
+	Name string
+	UID  types.UID
+	GVK  schema.GroupVersionKind
 }
 
 func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
@@ -133,10 +164,10 @@ func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 			return false, nil
 		}
 		for _, ref := range ownerRefs {
-			if ref.UID == o.owner.GetUID() &&
-				ref.Kind == o.owner.GetObjectKind().GroupVersionKind().Kind &&
-				ref.APIVersion == o.owner.GetObjectKind().GroupVersionKind().GroupVersion().String() &&
-				ref.Name == o.owner.GetName() {
+			if ref.UID == o.UID &&
+				ref.Kind == o.GVK.Kind &&
+				ref.APIVersion == o.GVK.GroupVersion().String() &&
+				ref.Name == o.Name {
 				return true, nil
 			}
 		}
@@ -147,15 +178,19 @@ func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 }
 
 func (o OwnershipMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to be owned by " + o.owner.GetName()
+	return "expected " + target.(client.Object).GetName() + " to be owned by " + o.Name
 }
 
 func (o OwnershipMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to be owned by " + o.owner.GetName()
+	return "expected " + target.(client.Object).GetName() + " not to be owned by " + o.Name
 }
 
 func HaveOwner(owner client.Object) gtypes.GomegaMatcher {
-	return &OwnershipMatcher{owner: owner}
+	return &OwnershipMatcher{
+		Name: owner.GetName(),
+		UID:  owner.GetUID(),
+		GVK:  owner.GetObjectKind().GroupVersionKind(),
+	}
 }
 
 type LabelMatcher struct {
