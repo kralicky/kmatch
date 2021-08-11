@@ -1,4 +1,4 @@
-package matchers_test
+package kmatch_test
 
 import (
 	"testing"

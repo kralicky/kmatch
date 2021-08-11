@@ -1,4 +1,4 @@
-package matchers
+package kmatch
 
 import (
 	"context"
@@ -256,11 +256,11 @@ func (o ReplicaCountMatcher) Match(target interface{}) (success bool, err error)
 }
 
 func (o ReplicaCountMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to have a replica count of" + fmt.Sprint(o.ReplicaCount)
+	return "expected " + target.(client.Object).GetName() + " to have a replica count of " + fmt.Sprint(o.ReplicaCount)
 }
 
 func (o ReplicaCountMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to have replica count of" + fmt.Sprint(o.ReplicaCount)
+	return "expected " + target.(client.Object).GetName() + " not to have replica count of " + fmt.Sprint(o.ReplicaCount)
 }
 
 func HaveReplicaCount(replicaCount int32) gtypes.GomegaMatcher {
