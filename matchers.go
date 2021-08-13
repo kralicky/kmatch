@@ -11,8 +11,8 @@ import (
 	gtypes "github.com/onsi/gomega/types"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,19 +23,100 @@ var (
 	ErrNotAClientObject      = errors.New("target is not a client.Object")
 )
 
-type ClientObject struct {
-	Client client.Client
-	Object client.Object
-}
+var defaultObjectClient client.Client
 
 // Object returns a function that will look up the object with the given name
 // and namespace in the cluster using the provided client.
-func Object(cli client.Client, obj client.Object) func() (client.Object, error) {
+// The client argument is optional. If it is not provided, a default client
+// must be set previously using SetDefaultObjectClient.
+// As a special case, the IsNotFound error is ignored.
+func Object(
+	obj client.Object,
+	optionalClient ...client.Client,
+) func() (client.Object, error) {
+	var c client.Client
+	if len(optionalClient) > 0 {
+		c = optionalClient[0]
+	} else {
+		if defaultObjectClient == nil {
+			panic("default client is not set - use SetDefaultObjectClient to set a default client")
+		}
+		c = defaultObjectClient
+	}
 	return func() (client.Object, error) {
 		copied := obj.DeepCopyObject().(client.Object)
-		err := cli.Get(context.Background(), client.ObjectKeyFromObject(obj), copied)
+		err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), copied)
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
 		return copied, err
 	}
+}
+
+func List(
+	list client.ObjectList,
+	opts *client.ListOptions,
+	optionalClient ...client.Client,
+) func() ([]client.Object, error) {
+	var c client.Client
+	if len(optionalClient) > 0 {
+		c = optionalClient[0]
+	} else {
+		if defaultObjectClient == nil {
+			panic("default client is not set - use SetDefaultObjectClient to set a default client")
+		}
+		c = defaultObjectClient
+	}
+	return func() ([]client.Object, error) {
+		copied := list.DeepCopyObject().(client.ObjectList)
+		err := c.List(context.Background(), copied, opts)
+		if err != nil {
+			return nil, err
+		}
+		// convert client.ObjectList to []client.Object
+		ret := []client.Object{}
+		items := reflect.ValueOf(list).Elem().FieldByName("Items")
+		for i := 0; i < items.Len(); i++ {
+			ret = append(ret, items.Index(i).Interface().(client.Object))
+		}
+		return ret, nil
+	}
+}
+
+// ExistAnd should be used in place of And(Exist(), ...), both because it
+// makes more sense grammatically and Exists always needs to be checked,
+// due to differences between Eventually and Consistently.
+func ExistAnd(matchers ...gtypes.GomegaMatcher) gtypes.GomegaMatcher {
+	return gomega.And(append([]gtypes.GomegaMatcher{Exist()}, matchers...)...)
+}
+
+func SetDefaultObjectClient(client client.Client) {
+	defaultObjectClient = client
+}
+
+type ExistenceMatcher struct{}
+
+func (o ExistenceMatcher) Match(target interface{}) (success bool, err error) {
+	if target == nil {
+		return false, nil
+	}
+	if obj, ok := target.(client.Object); ok {
+		return obj.GetCreationTimestamp() != metav1.Time{} &&
+			obj.GetDeletionTimestamp() == nil, nil
+	}
+	return false, fmt.Errorf("error in ExistenceMatcher: %w", ErrNotAClientObject)
+}
+
+func (o ExistenceMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to exist"
+}
+
+func (o ExistenceMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to exist"
+}
+
+func Exist() gtypes.GomegaMatcher {
+	return &ExistenceMatcher{}
 }
 
 type NameMatcher struct {
@@ -125,13 +206,18 @@ func HaveNamespace(namespace string) gtypes.GomegaMatcher {
 }
 
 type ImageMatcher struct {
-	Image string
+	Image      string
+	PullPolicy *corev1.PullPolicy
 }
 
 func (o ImageMatcher) Match(target interface{}) (success bool, err error) {
 	switch t := target.(type) {
 	case corev1.Container:
-		return t.Image == o.Image, nil
+		match := t.Image == o.Image
+		if o.PullPolicy != nil {
+			match = match && (*o.PullPolicy == t.ImagePullPolicy)
+		}
+		return match, nil
 	default:
 		return false, fmt.Errorf(
 			"%w %T in ImageMatcher (allowed types: corev1.Container)",
@@ -147,14 +233,16 @@ func (o ImageMatcher) NegatedFailureMessage(target interface{}) (message string)
 	return "expected " + target.(client.Object).GetName() + " not to have image " + o.Image
 }
 
-func HaveImage(image string) gtypes.GomegaMatcher {
-	return &ImageMatcher{Image: image}
+func HaveImage(image string, maybeImagePullPolicy ...corev1.PullPolicy) gtypes.GomegaMatcher {
+	m := &ImageMatcher{Image: image}
+	if len(maybeImagePullPolicy) > 0 {
+		m.PullPolicy = &maybeImagePullPolicy[0]
+	}
+	return m
 }
 
 type OwnershipMatcher struct {
-	Name string
-	UID  types.UID
-	GVK  schema.GroupVersionKind
+	Owner client.Object
 }
 
 func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
@@ -163,33 +251,32 @@ func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 		if len(ownerRefs) == 0 {
 			return false, nil
 		}
+		gvk := o.Owner.GetObjectKind().GroupVersionKind()
 		for _, ref := range ownerRefs {
-			if ref.UID == o.UID &&
-				ref.Kind == o.GVK.Kind &&
-				ref.APIVersion == o.GVK.GroupVersion().String() &&
-				ref.Name == o.Name {
+			if ref.UID == o.Owner.GetUID() &&
+				ref.Kind == gvk.Kind &&
+				ref.APIVersion == gvk.GroupVersion().String() &&
+				ref.Name == o.Owner.GetName() {
 				return true, nil
 			}
 		}
 	} else {
-		return false, ErrNotAClientObject
+		return false, fmt.Errorf("error in OwnershipMatcher: %w", ErrNotAClientObject)
 	}
 	return false, nil
 }
 
 func (o OwnershipMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to be owned by " + o.Name
+	return "expected " + target.(client.Object).GetName() + " to be owned by " + o.Owner.GetName()
 }
 
 func (o OwnershipMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to be owned by " + o.Name
+	return "expected " + target.(client.Object).GetName() + " not to be owned by " + o.Owner.GetName()
 }
 
 func HaveOwner(owner client.Object) gtypes.GomegaMatcher {
 	return &OwnershipMatcher{
-		Name: owner.GetName(),
-		UID:  owner.GetUID(),
-		GVK:  owner.GetObjectKind().GroupVersionKind(),
+		Owner: owner,
 	}
 }
 
@@ -197,24 +284,37 @@ type LabelMatcher struct {
 	labels map[string]string
 }
 
+// returns true if a is a subset of b, otherwise false.
+func isSubset(a, b map[string]string) bool {
+	for k, v := range a {
+		if v2, ok := b[k]; !ok || v != v2 {
+			return false
+		}
+	}
+	return true
+}
+
 func (o LabelMatcher) Match(target interface{}) (success bool, err error) {
 	switch t := target.(type) {
 	case *appsv1.Deployment:
-		return reflect.DeepEqual(o.labels, t.Labels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Selector.MatchLabels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Template.Labels), nil
+		return isSubset(o.labels, t.Labels) &&
+			isSubset(o.labels, t.Spec.Selector.MatchLabels) &&
+			isSubset(o.labels, t.Spec.Template.Labels), nil
 	case *appsv1.StatefulSet:
-		return reflect.DeepEqual(o.labels, t.Labels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Selector.MatchLabels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Template.Labels), nil
+		return isSubset(o.labels, t.Labels) &&
+			isSubset(o.labels, t.Spec.Selector.MatchLabels) &&
+			isSubset(o.labels, t.Spec.Template.Labels), nil
 	case *appsv1.DaemonSet:
-		return reflect.DeepEqual(o.labels, t.Labels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Selector.MatchLabels) &&
-			reflect.DeepEqual(o.labels, t.Spec.Template.Labels), nil
+		return isSubset(o.labels, t.Labels) &&
+			isSubset(o.labels, t.Spec.Selector.MatchLabels) &&
+			isSubset(o.labels, t.Spec.Template.Labels), nil
 	case *corev1.Pod:
-		return reflect.DeepEqual(o.labels, t.Labels), nil
+		return isSubset(o.labels, t.Labels), nil
 	case *corev1.Namespace:
-		return reflect.DeepEqual(o.labels, t.Labels), nil
+		return isSubset(o.labels, t.Labels), nil
+	case *corev1.Service:
+		return isSubset(o.labels, t.Labels) &&
+			isSubset(o.labels, t.Spec.Selector), nil
 	default:
 		return false, fmt.Errorf(
 			"%w %T in LabelMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *corev1.Pod, *corev1.Namespace)",
@@ -223,11 +323,11 @@ func (o LabelMatcher) Match(target interface{}) (success bool, err error) {
 }
 
 func (o LabelMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to have labels " + fmt.Sprint(target)
+	return "expected " + target.(client.Object).GetName() + " to have labels " + fmt.Sprint(o.labels)
 }
 
 func (o LabelMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to have labels " + fmt.Sprint(target)
+	return "expected " + target.(client.Object).GetName() + " not to have labels " + fmt.Sprint(o.labels)
 }
 
 func HaveLabels(keysAndValues ...string) gtypes.GomegaMatcher {
@@ -651,9 +751,26 @@ func (o PortMatcher) Match(target interface{}) (success bool, err error) {
 			}
 		}
 		return false, nil
+	case *corev1.Service:
+		for _, port := range o.Ports {
+			if port.Type == intstr.Int {
+				for _, tp := range t.Spec.Ports {
+					if tp.Port == port.IntVal {
+						return true, nil
+					}
+				}
+			} else {
+				for _, tp := range t.Spec.Ports {
+					if tp.Name == port.StrVal {
+						return true, nil
+					}
+				}
+			}
+		}
+		return false, nil
 	default:
 		return false, fmt.Errorf(
-			"%w %T in PortMatcher (allowed types: corev1.Container)",
+			"%w %T in PortMatcher (allowed types: corev1.Container, *corev1.Service)",
 			ErrUnsupportedObjectType, target)
 	}
 }
@@ -678,4 +795,214 @@ func HavePorts(intsOrStrings ...interface{}) gtypes.GomegaMatcher {
 		}
 	}
 	return pm
+}
+
+type ImagePullSecretsMatcher struct {
+	Secrets []string
+}
+
+func (o ImagePullSecretsMatcher) Match(target interface{}) (success bool, err error) {
+	var spec *corev1.PodSpec
+	switch t := target.(type) {
+	case *corev1.Pod:
+		spec = &t.Spec
+	case *appsv1.Deployment:
+		spec = &t.Spec.Template.Spec
+	case *appsv1.StatefulSet:
+		spec = &t.Spec.Template.Spec
+	case *appsv1.DaemonSet:
+		spec = &t.Spec.Template.Spec
+	default:
+		return false, fmt.Errorf(
+			"%w %T in ImagePullSecretsMatcher (allowed types: *corev1.Pod)",
+			ErrUnsupportedObjectType, target)
+	}
+	for _, desired := range o.Secrets {
+		found := false
+		for _, actual := range spec.ImagePullSecrets {
+			if actual.Name == desired {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (o ImagePullSecretsMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " todo"
+}
+
+func (o ImagePullSecretsMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not todo"
+}
+
+func HaveImagePullSecrets(secrets ...string) gtypes.GomegaMatcher {
+	return &ImagePullSecretsMatcher{
+		Secrets: secrets,
+	}
+}
+
+type DataMatcher struct {
+	keysAndValues []interface{}
+}
+
+func (o DataMatcher) Match(target interface{}) (success bool, err error) {
+	data := map[string]string{}
+	switch t := target.(type) {
+	case *corev1.Secret:
+		for k, v := range t.Data {
+			data[k] = string(v)
+		}
+	case *corev1.ConfigMap:
+		data = t.Data
+	}
+	for i := 0; i < len(o.keysAndValues); i += 2 {
+		key := fmt.Sprint(o.keysAndValues[i])
+		value := o.keysAndValues[i+1]
+		if _, ok := data[key]; !ok {
+			return false, nil
+		}
+		if value == nil {
+			return true, nil
+		}
+		if data[key] != fmt.Sprint(value) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (o DataMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " todo"
+}
+
+func (o DataMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not todo"
+}
+
+func HaveData(keysAndValues ...interface{}) gtypes.GomegaMatcher {
+	// ensure we have an even number of arguments and that all arguments are
+	// string or nil
+	if len(keysAndValues)%2 != 0 {
+		panic("HaveData requires an even number of arguments")
+	}
+	for _, item := range keysAndValues {
+		switch item.(type) {
+		case string, nil:
+		default:
+			panic("HaveData requires string or nil arguments")
+		}
+	}
+	return &DataMatcher{
+		keysAndValues: keysAndValues,
+	}
+}
+
+type ServiceTypeMatcher struct {
+	Type corev1.ServiceType
+}
+
+func (o ServiceTypeMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case *corev1.Service:
+		if t.Spec.Type == o.Type {
+			return true, nil
+		}
+	default:
+		return false, fmt.Errorf(
+			"%w %T in ServiceTypeMatcher (allowed types: *corev1.Service)",
+			ErrUnsupportedObjectType, target)
+	}
+	return false, nil
+}
+
+func (o ServiceTypeMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have service type " + string(o.Type)
+}
+
+func (o ServiceTypeMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have service type " + string(o.Type)
+}
+
+func HaveType(t corev1.ServiceType) gtypes.GomegaMatcher {
+	return &ServiceTypeMatcher{
+		Type: t,
+	}
+}
+
+type HeadlessMatcher struct{}
+
+func (o HeadlessMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case *corev1.Service:
+		return t.Spec.Type == corev1.ServiceTypeClusterIP && t.Spec.ClusterIP == "None", nil
+	default:
+		return false, fmt.Errorf(
+			"%w %T in HeadlessMatcher (allowed types: *corev1.Service)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (o HeadlessMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to be a headless service"
+}
+
+func (o HeadlessMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to be a headless service"
+}
+
+func BeHeadless() gtypes.GomegaMatcher {
+	return &HeadlessMatcher{}
+}
+
+type StatusMatcher struct {
+	Predicate reflect.Value
+}
+
+func (o StatusMatcher) Match(target interface{}) (success bool, err error) {
+	// Get the status field of the target object
+	statusField := reflect.ValueOf(target).Elem().FieldByName("Status")
+	if !statusField.IsValid() {
+		return false, fmt.Errorf("%T has no Status field", target)
+	}
+
+	// Check if the status field can be converted to the argument expected by the
+	// predicate function
+	statusFieldType := statusField.Type()
+	if statusFieldType.ConvertibleTo(o.Predicate.Type().In(0)) {
+		// Convert the status field to the expected type
+		statusFieldValue := statusField.Convert(o.Predicate.Type().In(0))
+		// Call the predicate function
+		return o.Predicate.Call([]reflect.Value{statusFieldValue})[0].Bool(), nil
+	}
+	return false, fmt.Errorf("%T.Status (type %T) is not convertible to %T",
+		target, statusFieldType, o.Predicate.Type().In(0))
+}
+
+func (o StatusMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " todo"
+}
+
+func (o StatusMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not todo"
+}
+
+func MatchStatus(predicate interface{}) gtypes.GomegaMatcher {
+	val := reflect.ValueOf(predicate)
+	if val.Kind() != reflect.Func {
+		panic("MatchStatus requires a function")
+	}
+	if val.Type().NumIn() != 1 {
+		panic("MatchStatus requires a function that takes exactly one argument")
+	}
+	if val.Type().NumOut() != 1 || val.Type().Out(0).Kind() != reflect.Bool {
+		panic("MatchStatus requires a function that returns a bool")
+	}
+	return &StatusMatcher{
+		Predicate: val,
+	}
 }
