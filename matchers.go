@@ -75,9 +75,9 @@ func List(
 		}
 		// convert client.ObjectList to []client.Object
 		ret := []client.Object{}
-		items := reflect.ValueOf(list).Elem().FieldByName("Items")
+		items := reflect.ValueOf(copied).Elem().FieldByName("Items")
 		for i := 0; i < items.Len(); i++ {
-			ret = append(ret, items.Index(i).Interface().(client.Object))
+			ret = append(ret, items.Index(i).Addr().Interface().(client.Object))
 		}
 		return ret, nil
 	}
