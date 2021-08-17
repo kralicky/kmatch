@@ -322,16 +322,11 @@ func (o LabelMatcher) Match(target interface{}) (success bool, err error) {
 		return isSubset(o.labels, t.Labels) &&
 			isSubset(o.labels, t.Spec.Selector.MatchLabels) &&
 			isSubset(o.labels, t.Spec.Template.Labels), nil
-	case *corev1.Pod:
-		return isSubset(o.labels, t.Labels), nil
-	case *corev1.Namespace:
-		return isSubset(o.labels, t.Labels), nil
-	case *corev1.Service:
-		return isSubset(o.labels, t.Labels) &&
-			isSubset(o.labels, t.Spec.Selector), nil
+	case metav1.Object:
+		return isSubset(o.labels, t.GetLabels()), nil
 	default:
 		return false, fmt.Errorf(
-			"%w %T in LabelMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *corev1.Pod, *corev1.Namespace)",
+			"%w %T in LabelMatcher (allowed types: any metav1.Object)",
 			ErrUnsupportedObjectType, target)
 	}
 }
