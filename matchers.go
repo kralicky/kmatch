@@ -108,10 +108,16 @@ func (o ExistenceMatcher) Match(target interface{}) (success bool, err error) {
 }
 
 func (o ExistenceMatcher) FailureMessage(target interface{}) (message string) {
+	if target == nil {
+		return "expected <nil object> to exist"
+	}
 	return "expected " + target.(client.Object).GetName() + " to exist"
 }
 
 func (o ExistenceMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	if target == nil {
+		return "expected <nil object> to exist"
+	}
 	return "expected " + target.(client.Object).GetName() + " not to exist"
 }
 
@@ -247,16 +253,20 @@ type OwnershipMatcher struct {
 
 func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 	if target, ok := target.(client.Object); ok {
-		ownerRefs := target.GetOwnerReferences()
-		if len(ownerRefs) == 0 {
-			return false, nil
+		// Get the latest version of the owner object to ensure the UID is set
+		copiedOwner := o.Owner.DeepCopyObject().(client.Object)
+		err := defaultObjectClient.Get(context.Background(),
+			client.ObjectKeyFromObject(copiedOwner), copiedOwner)
+		if err != nil {
+			// If the owner is not found, that is not an error condition.
+			return false, client.IgnoreNotFound(err)
 		}
-		gvk := o.Owner.GetObjectKind().GroupVersionKind()
-		for _, ref := range ownerRefs {
-			if ref.UID == o.Owner.GetUID() &&
+		gvk := copiedOwner.GetObjectKind().GroupVersionKind()
+		for _, ref := range target.GetOwnerReferences() {
+			if ref.UID == copiedOwner.GetUID() &&
 				ref.Kind == gvk.Kind &&
 				ref.APIVersion == gvk.GroupVersion().String() &&
-				ref.Name == o.Owner.GetName() {
+				ref.Name == copiedOwner.GetName() {
 				return true, nil
 			}
 		}
@@ -267,11 +277,15 @@ func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 }
 
 func (o OwnershipMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to be owned by " + o.Owner.GetName()
+	object := target.(client.Object)
+	return fmt.Sprintf("expected %s to be owned by %s\n\tcurrent owner references: %v",
+		object.GetName(), o.Owner.GetName(), object.GetOwnerReferences())
 }
 
 func (o OwnershipMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to be owned by " + o.Owner.GetName()
+	object := target.(client.Object)
+	return fmt.Sprintf("expected %s not to be owned by %s\n\tcurrent owner references: %v",
+		object.GetName(), o.Owner.GetName(), object.GetOwnerReferences())
 }
 
 func HaveOwner(owner client.Object) gtypes.GomegaMatcher {
@@ -693,17 +707,28 @@ func HaveEnv(keysAndValues ...interface{}) gtypes.GomegaMatcher {
 }
 
 type VolumeMountMatcher struct {
-	VolumeMountNames []string
+	VolumeMounts []interface{}
 }
 
 func (o VolumeMountMatcher) Match(target interface{}) (success bool, err error) {
 	switch t := target.(type) {
 	case corev1.Container:
-		for _, expected := range o.VolumeMountNames {
-			for _, actual := range t.VolumeMounts {
-				if actual.Name == expected {
-					return true, nil
+		for _, expected := range o.VolumeMounts {
+			switch v := expected.(type) {
+			case corev1.VolumeMount:
+				for _, actual := range t.VolumeMounts {
+					if actual == v {
+						return true, nil
+					}
 				}
+			case string:
+				for _, actual := range t.VolumeMounts {
+					if actual.Name == v {
+						return true, nil
+					}
+				}
+			default:
+				panic("shouldn't get here")
 			}
 		}
 		return false, nil
@@ -722,10 +747,17 @@ func (o VolumeMountMatcher) NegatedFailureMessage(target interface{}) (message s
 	return "expected " + target.(client.Object).GetName() + " not to have a matching volume mount"
 }
 
-func HaveVolumeMounts(volumeMountNames ...string) gtypes.GomegaMatcher {
-	return &VolumeMountMatcher{
-		VolumeMountNames: volumeMountNames,
+func HaveVolumeMounts(volumeMountNamesOrSpecs ...interface{}) gtypes.GomegaMatcher {
+	matcher := &VolumeMountMatcher{}
+	for _, volumeMountNameOrSpec := range volumeMountNamesOrSpecs {
+		switch v := volumeMountNameOrSpec.(type) {
+		case corev1.VolumeMount, string:
+			matcher.VolumeMounts = append(matcher.VolumeMounts, v)
+		default:
+			panic("HaveVolumeMounts requires string or corev1.VolumeMount arguments")
+		}
 	}
+	return matcher
 }
 
 type PortMatcher struct {
@@ -833,11 +865,11 @@ func (o ImagePullSecretsMatcher) Match(target interface{}) (success bool, err er
 }
 
 func (o ImagePullSecretsMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " todo"
+	return "expected " + target.(client.Object).GetName() + " to have image pull secrets " + fmt.Sprintf("%v", o.Secrets)
 }
 
 func (o ImagePullSecretsMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not todo"
+	return "expected " + target.(client.Object).GetName() + " not to have image pull secrets " + fmt.Sprintf("%v", o.Secrets)
 }
 
 func HaveImagePullSecrets(secrets ...string) gtypes.GomegaMatcher {
@@ -849,6 +881,7 @@ func HaveImagePullSecrets(secrets ...string) gtypes.GomegaMatcher {
 type DataMatcher struct {
 	keysAndValues []interface{}
 }
+type Predicate = func(string) bool
 
 func (o DataMatcher) Match(target interface{}) (success bool, err error) {
 	data := map[string]string{}
@@ -866,35 +899,39 @@ func (o DataMatcher) Match(target interface{}) (success bool, err error) {
 		if _, ok := data[key]; !ok {
 			return false, nil
 		}
-		if value == nil {
+		switch v := value.(type) {
+		case string:
+			return data[key] == fmt.Sprint(value), nil
+		case nil:
 			return true, nil
-		}
-		if data[key] != fmt.Sprint(value) {
-			return false, nil
+		case Predicate:
+			return v(data[key]), nil
+		default:
+			panic("shouldn't get here")
 		}
 	}
 	return true, nil
 }
 
 func (o DataMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " todo"
+	return "expected " + target.(client.Object).GetName() + " to contain key-value pairs " + fmt.Sprintf("%v", o.keysAndValues)
 }
 
 func (o DataMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not todo"
+	return "expected " + target.(client.Object).GetName() + " not to contain key-value pairs " + fmt.Sprintf("%v", o.keysAndValues)
 }
 
 func HaveData(keysAndValues ...interface{}) gtypes.GomegaMatcher {
 	// ensure we have an even number of arguments and that all arguments are
-	// string or nil
+	// string, nil, or func(string) bool
 	if len(keysAndValues)%2 != 0 {
 		panic("HaveData requires an even number of arguments")
 	}
 	for _, item := range keysAndValues {
 		switch item.(type) {
-		case string, nil:
+		case string, nil, Predicate:
 		default:
-			panic("HaveData requires string or nil arguments")
+			panic("HaveData requires arguments of type string, nil, or Predicate")
 		}
 	}
 	return &DataMatcher{
@@ -984,11 +1021,11 @@ func (o StatusMatcher) Match(target interface{}) (success bool, err error) {
 }
 
 func (o StatusMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " todo"
+	return "expected " + target.(client.Object).GetName() + " to match a status predicate"
 }
 
 func (o StatusMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not todo"
+	return "expected " + target.(client.Object).GetName() + " not to match a status predicate"
 }
 
 func MatchStatus(predicate interface{}) gtypes.GomegaMatcher {
