@@ -2,6 +2,7 @@ package kmatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -383,9 +384,9 @@ type VolumeSourceMatcher struct {
 func (o VolumeSourceMatcher) Match(target interface{}) (success bool, err error) {
 	switch t := target.(type) {
 	case corev1.Volume:
-		return !reflect.ValueOf(t.VolumeSource).FieldByName(o.Source).IsNil(), nil
+		return reflect.ValueOf(t.VolumeSource).FieldByName(o.Source).IsValid(), nil
 	case corev1.PersistentVolume:
-		return !reflect.ValueOf(t.Spec.PersistentVolumeSource).FieldByName(o.Source).IsNil(), nil
+		return reflect.ValueOf(t.Spec.PersistentVolumeSource).FieldByName(o.Source).IsValid(), nil
 	default:
 		return false, fmt.Errorf(
 			"%w %T in VolumeSourceMatcher (allowed types: corev1.Volume, corev1.PersistentVolume)",
@@ -469,6 +470,7 @@ func HaveStorageClass(storageClass string) gtypes.GomegaMatcher {
 
 type VolumeMatcher struct {
 	Matcher gtypes.GomegaMatcher
+	Volumes []corev1.Volume
 }
 
 func matchAny(matcher gtypes.GomegaMatcher, slice interface{}) (_ bool, err error) {
@@ -483,29 +485,32 @@ func matchAny(matcher gtypes.GomegaMatcher, slice interface{}) (_ bool, err erro
 	return
 }
 
-func (o VolumeMatcher) Match(target interface{}) (bool, error) {
+func (o *VolumeMatcher) Match(target interface{}) (bool, error) {
 	switch t := target.(type) {
 	case *appsv1.Deployment:
-		return matchAny(o.Matcher, t.Spec.Template.Spec.Volumes)
+		o.Volumes = t.Spec.Template.Spec.Volumes
 	case *appsv1.StatefulSet:
-		return matchAny(o.Matcher, t.Spec.Template.Spec.Volumes)
+		o.Volumes = t.Spec.Template.Spec.Volumes
 	case *appsv1.DaemonSet:
-		return matchAny(o.Matcher, t.Spec.Template.Spec.Volumes)
+		o.Volumes = t.Spec.Template.Spec.Volumes
 	case *corev1.Pod:
-		return matchAny(o.Matcher, t.Spec.Volumes)
+		o.Volumes = t.Spec.Volumes
 	default:
 		return false, fmt.Errorf(
 			"%w %T in VolumeMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *corev1.Pod)",
 			ErrUnsupportedObjectType, target)
 	}
+	return matchAny(o.Matcher, o.Volumes)
 }
 
-func (o VolumeMatcher) FailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " to have a matching volume"
+func (o *VolumeMatcher) FailureMessage(target interface{}) (message string) {
+	s, _ := json.MarshalIndent(o.Volumes, "", "  ")
+	return fmt.Sprintf("expected %s to contain a matching volume", string(s))
 }
 
-func (o VolumeMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to have a matching volume"
+func (o *VolumeMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	s, _ := json.MarshalIndent(o.Volumes, "", "  ")
+	return fmt.Sprintf("expected %s to not contain a matching volume", string(s))
 }
 
 func HaveMatchingVolume(matcher gtypes.GomegaMatcher) gtypes.GomegaMatcher {
