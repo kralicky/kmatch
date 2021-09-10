@@ -50,6 +50,19 @@ var _ = Describe("Matchers", func() {
 								},
 							},
 						},
+						NodeSelector: map[string]string{
+							"foo": "bar",
+						},
+						Tolerations: []corev1.Toleration{
+							{
+								Key:      "foo",
+								Operator: corev1.TolerationOpExists,
+							},
+							{
+								Key:      "bar",
+								Operator: corev1.TolerationOpExists,
+							},
+						},
 					},
 				},
 			},
@@ -68,12 +81,19 @@ var _ = Describe("Matchers", func() {
 				HaveVolumeSource("EmptyDir"),
 			)),
 			Not(HaveMatchingVolume(HaveName("bar"))),
+			HaveNodeSelector("foo", "bar"),
+			Not(HaveNodeSelector("fizz", "buzz")),
 			HaveMatchingContainer(And(
 				HaveName("foo"),
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo"),
 			)),
+			HaveTolerations("foo", corev1.Toleration{
+				Key:      "bar",
+				Operator: corev1.TolerationOpExists,
+			}),
+			Not(HaveTolerations("baz")),
 		))
 	})
 	It("should match statefulsets", func() {
@@ -125,6 +145,19 @@ var _ = Describe("Matchers", func() {
 								},
 							},
 						},
+						NodeSelector: map[string]string{
+							"foo": "bar",
+						},
+						Tolerations: []corev1.Toleration{
+							{
+								Key:      "foo",
+								Operator: corev1.TolerationOpExists,
+							},
+							{
+								Key:      "bar",
+								Operator: corev1.TolerationOpExists,
+							},
+						},
 					},
 				},
 				VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
@@ -170,6 +203,13 @@ var _ = Describe("Matchers", func() {
 				HaveName("bar"),
 				HaveStorageClass("some-storage-class"),
 			)),
+			HaveNodeSelector("foo", "bar"),
+			Not(HaveNodeSelector("fizz", "buzz")),
+			HaveTolerations("foo", corev1.Toleration{
+				Key:      "bar",
+				Operator: corev1.TolerationOpExists,
+			}),
+			Not(HaveTolerations("baz")),
 		))
 	})
 	It("should match daemonsets", func() {
@@ -224,6 +264,19 @@ var _ = Describe("Matchers", func() {
 								},
 							},
 						},
+						NodeSelector: map[string]string{
+							"foo": "bar",
+						},
+						Tolerations: []corev1.Toleration{
+							{
+								Key:      "foo",
+								Operator: corev1.TolerationOpExists,
+							},
+							{
+								Key:      "bar",
+								Operator: corev1.TolerationOpExists,
+							},
+						},
 					},
 				},
 			},
@@ -257,6 +310,13 @@ var _ = Describe("Matchers", func() {
 					},
 				}),
 			)),
+			HaveNodeSelector("foo", "bar"),
+			Not(HaveNodeSelector("fizz", "buzz")),
+			HaveTolerations("foo", corev1.Toleration{
+				Key:      "bar",
+				Operator: corev1.TolerationOpExists,
+			}),
+			Not(HaveTolerations("baz")),
 		))
 	})
 	It("should match pods", func() {
@@ -299,6 +359,19 @@ var _ = Describe("Matchers", func() {
 						},
 					},
 				},
+				NodeSelector: map[string]string{
+					"foo": "bar",
+				},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "foo",
+						Operator: corev1.TolerationOpExists,
+					},
+					{
+						Key:      "bar",
+						Operator: corev1.TolerationOpExists,
+					},
+				},
 			},
 		}
 		Expect(pod).To(And(
@@ -320,6 +393,13 @@ var _ = Describe("Matchers", func() {
 				HaveName("bar"),
 				HaveVolumeSource("ConfigMap"),
 			)),
+			HaveNodeSelector("foo", "bar"),
+			Not(HaveNodeSelector("fizz", "buzz")),
+			HaveTolerations("foo", corev1.Toleration{
+				Key:      "bar",
+				Operator: corev1.TolerationOpExists,
+			}),
+			Not(HaveTolerations("baz")),
 		))
 	})
 })

@@ -1043,3 +1043,190 @@ func MatchStatus(predicate interface{}) gtypes.GomegaMatcher {
 		Predicate: val,
 	}
 }
+
+type NodeSelectorMatcher struct {
+	nodeSelector map[string]string
+}
+
+func (o NodeSelectorMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case *appsv1.Deployment:
+		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
+	case *appsv1.StatefulSet:
+		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
+	case *appsv1.DaemonSet:
+		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
+	case *corev1.Pod:
+		return reflect.DeepEqual(o.nodeSelector, t.Spec.NodeSelector), nil
+	default:
+		return false, fmt.Errorf(
+			"%w %T in NodeSelectorMatcher (allowed types: Deployment, StatefulSet, DaemonSet, or Pod)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (o NodeSelectorMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have nodeSelector" + fmt.Sprint(o.nodeSelector)
+}
+
+func (o NodeSelectorMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have nodeSelector" + fmt.Sprint(o.nodeSelector)
+}
+
+func HaveNodeSelector(keysAndValues ...string) gtypes.GomegaMatcher {
+	ns := &NodeSelectorMatcher{nodeSelector: make(map[string]string)}
+	for i := 0; i < len(keysAndValues); i += 2 {
+		ns.nodeSelector[keysAndValues[i]] = keysAndValues[i+1]
+	}
+	return ns
+}
+
+type TolerationMatcher struct {
+	Tolerations []interface{}
+}
+
+func (o TolerationMatcher) Match(target interface{}) (success bool, err error) {
+	switch x := target.(type) {
+	case *appsv1.Deployment:
+		found := map[int]bool{}
+		for i, expected := range o.Tolerations {
+			found[i] = false
+			switch t := expected.(type) {
+			case corev1.Toleration:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual == t {
+						found[i] = true
+						break
+					}
+				}
+			case string:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual.Key == t {
+						found[i] = true
+						break
+					}
+				}
+			default:
+				panic("shouldn't get here")
+			}
+		}
+		for _, v := range found {
+			if !v {
+				return false, nil
+			}
+		}
+		return true, nil
+	case *appsv1.StatefulSet:
+		found := map[int]bool{}
+		for i, expected := range o.Tolerations {
+			found[i] = false
+			switch t := expected.(type) {
+			case corev1.Toleration:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual == t {
+						found[i] = true
+						break
+					}
+				}
+			case string:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual.Key == t {
+						found[i] = true
+						break
+					}
+				}
+			default:
+				panic("shouldn't get here")
+			}
+		}
+		for _, v := range found {
+			if !v {
+				return false, nil
+			}
+		}
+		return true, nil
+	case *appsv1.DaemonSet:
+		found := map[int]bool{}
+		for i, expected := range o.Tolerations {
+			found[i] = false
+			switch t := expected.(type) {
+			case corev1.Toleration:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual == t {
+						found[i] = true
+						break
+					}
+				}
+			case string:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual.Key == t {
+						found[i] = true
+						break
+					}
+				}
+			default:
+				panic("shouldn't get here")
+			}
+		}
+		for _, v := range found {
+			if !v {
+				return false, nil
+			}
+		}
+		return true, nil
+	case *corev1.Pod:
+		found := map[int]bool{}
+		for i, expected := range o.Tolerations {
+			found[i] = false
+			switch t := expected.(type) {
+			case corev1.Toleration:
+				for _, actual := range x.Spec.Tolerations {
+					if actual == t {
+						found[i] = true
+						break
+					}
+				}
+			case string:
+				for _, actual := range x.Spec.Tolerations {
+					if actual.Key == t {
+						found[i] = true
+						break
+					}
+				}
+			default:
+				panic("shouldn't get here")
+			}
+		}
+		for _, v := range found {
+			if !v {
+				return false, nil
+			}
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"%w %T in TolerationMatcher (allowed types: corev1.Pod, appsv1.Deployment, appsv1.StatefulSet, appsv1.DaemonSet)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (o TolerationMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to match all tolerations"
+}
+
+func (o TolerationMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to not match any tolerations"
+}
+
+func HaveTolerations(tolerationsOrKeys ...interface{}) gtypes.GomegaMatcher {
+	matcher := &TolerationMatcher{}
+	for _, tolerationOrKey := range tolerationsOrKeys {
+		switch v := tolerationOrKey.(type) {
+		case corev1.Toleration, string:
+			matcher.Tolerations = append(matcher.Tolerations, v)
+		default:
+			panic("Tolerations requires string or corev1.Toleration arguments")
+		}
+	}
+	return matcher
+}
