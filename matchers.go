@@ -262,11 +262,8 @@ func (o OwnershipMatcher) Match(target interface{}) (success bool, err error) {
 			// If the owner is not found, that is not an error condition.
 			return false, client.IgnoreNotFound(err)
 		}
-		gvk := copiedOwner.GetObjectKind().GroupVersionKind()
 		for _, ref := range target.GetOwnerReferences() {
 			if ref.UID == copiedOwner.GetUID() &&
-				ref.Kind == gvk.Kind &&
-				ref.APIVersion == gvk.GroupVersion().String() &&
 				ref.Name == copiedOwner.GetName() {
 				return true, nil
 			}
