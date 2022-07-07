@@ -6,6 +6,7 @@ import (
 
 	. "github.com/kralicky/kmatch"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
@@ -312,6 +313,87 @@ var _ = Describe("Matchers", func() {
 			)),
 			HaveNodeSelector("foo", "bar"),
 			Not(HaveNodeSelector("fizz", "buzz")),
+			HaveTolerations("foo", corev1.Toleration{
+				Key:      "bar",
+				Operator: corev1.TolerationOpExists,
+			}),
+			Not(HaveTolerations("baz")),
+		))
+	})
+	It("should match jobs", func() {
+		deployment := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "bar",
+				Labels:    map[string]string{"app": "foo"},
+			},
+			Spec: batchv1.JobSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "foo",
+					},
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:         "foo",
+								Image:        "someimage",
+								Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
+								Env:          []corev1.EnvVar{{Name: "FOO", Value: "BAR"}},
+								VolumeMounts: []corev1.VolumeMount{{Name: "foo", MountPath: "/foo"}},
+							},
+						},
+						Volumes: []corev1.Volume{
+							{
+								Name: "foo",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						},
+						NodeSelector: map[string]string{
+							"foo": "bar",
+						},
+						Tolerations: []corev1.Toleration{
+							{
+								Key:      "foo",
+								Operator: corev1.TolerationOpExists,
+							},
+							{
+								Key:      "bar",
+								Operator: corev1.TolerationOpExists,
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(deployment).To(And(
+			HaveName("foo"),
+			Not(HaveName("bar")),
+			HaveNamespace("bar"),
+			Not(HaveNamespace("baz")),
+			HaveLabels("app", "foo"),
+			Not(HaveLabels("app", "bar")),
+			HaveMatchingVolume(And(
+				HaveName("foo"),
+				HaveVolumeSource("EmptyDir"),
+			)),
+			Not(HaveMatchingVolume(HaveName("bar"))),
+			HaveNodeSelector("foo", "bar"),
+			Not(HaveNodeSelector("fizz", "buzz")),
+			HaveMatchingContainer(And(
+				HaveName("foo"),
+				HavePorts(8080),
+				HaveEnv("FOO", "BAR"),
+				HaveVolumeMounts("foo"),
+			)),
 			HaveTolerations("foo", corev1.Toleration{
 				Key:      "bar",
 				Operator: corev1.TolerationOpExists,
