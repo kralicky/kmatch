@@ -321,7 +321,7 @@ var _ = Describe("Matchers", func() {
 		))
 	})
 	It("should match jobs", func() {
-		deployment := &batchv1.Job{
+		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "foo",
 				Namespace: "bar",
@@ -374,7 +374,7 @@ var _ = Describe("Matchers", func() {
 				},
 			},
 		}
-		Expect(deployment).To(And(
+		Expect(job).To(And(
 			HaveName("foo"),
 			Not(HaveName("bar")),
 			HaveNamespace("bar"),
