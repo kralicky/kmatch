@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/gomega"
 	gtypes "github.com/onsi/gomega/types"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -490,11 +491,13 @@ func (o *VolumeMatcher) Match(target interface{}) (bool, error) {
 		o.Volumes = t.Spec.Template.Spec.Volumes
 	case *appsv1.DaemonSet:
 		o.Volumes = t.Spec.Template.Spec.Volumes
+	case *batchv1.Job:
+		o.Volumes = t.Spec.Template.Spec.Volumes
 	case *corev1.Pod:
 		o.Volumes = t.Spec.Volumes
 	default:
 		return false, fmt.Errorf(
-			"%w %T in VolumeMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *corev1.Pod)",
+			"%w %T in VolumeMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *batchv1.Volume, *corev1.Pod)",
 			ErrUnsupportedObjectType, target)
 	}
 	return matchAny(o.Matcher, o.Volumes)
@@ -626,11 +629,13 @@ func (o ContainerMatcher) Match(target interface{}) (_ bool, err error) {
 		return matchAny(o.Matcher, t.Spec.Template.Spec.Containers)
 	case *appsv1.DaemonSet:
 		return matchAny(o.Matcher, t.Spec.Template.Spec.Containers)
+	case *batchv1.Job:
+		return matchAny(o.Matcher, t.Spec.Template.Spec.Containers)
 	case *corev1.Pod:
 		return matchAny(o.Matcher, t.Spec.Containers)
 	default:
 		return false, fmt.Errorf(
-			"%w %T in ContainerMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *corev1.Pod)",
+			"%w %T in ContainerMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet, *batchv1.Job, *corev1.Pod)",
 			ErrUnsupportedObjectType, target)
 	}
 }
@@ -1053,11 +1058,13 @@ func (o NodeSelectorMatcher) Match(target interface{}) (success bool, err error)
 		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
 	case *appsv1.DaemonSet:
 		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
+	case *batchv1.Job:
+		return reflect.DeepEqual(o.nodeSelector, t.Spec.Template.Spec.NodeSelector), nil
 	case *corev1.Pod:
 		return reflect.DeepEqual(o.nodeSelector, t.Spec.NodeSelector), nil
 	default:
 		return false, fmt.Errorf(
-			"%w %T in NodeSelectorMatcher (allowed types: Deployment, StatefulSet, DaemonSet, or Pod)",
+			"%w %T in NodeSelectorMatcher (allowed types: Deployment, StatefulSet, DaemonSet, Job, or Pod)",
 			ErrUnsupportedObjectType, target)
 	}
 }
@@ -1171,6 +1178,35 @@ func (o TolerationMatcher) Match(target interface{}) (success bool, err error) {
 			}
 		}
 		return true, nil
+	case *batchv1.Job:
+		found := map[int]bool{}
+		for i, expected := range o.Tolerations {
+			found[i] = false
+			switch t := expected.(type) {
+			case corev1.Toleration:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual == t {
+						found[i] = true
+						break
+					}
+				}
+			case string:
+				for _, actual := range x.Spec.Template.Spec.Tolerations {
+					if actual.Key == t {
+						found[i] = true
+						break
+					}
+				}
+			default:
+				panic("shouldn't get here")
+			}
+		}
+		for _, v := range found {
+			if !v {
+				return false, nil
+			}
+		}
+		return true, nil
 	case *corev1.Pod:
 		found := map[int]bool{}
 		for i, expected := range o.Tolerations {
@@ -1202,7 +1238,7 @@ func (o TolerationMatcher) Match(target interface{}) (success bool, err error) {
 		return true, nil
 	default:
 		return false, fmt.Errorf(
-			"%w %T in TolerationMatcher (allowed types: corev1.Pod, appsv1.Deployment, appsv1.StatefulSet, appsv1.DaemonSet)",
+			"%w %T in TolerationMatcher (allowed types: corev1.Pod, appsv1.Deployment, appsv1.StatefulSet, appsv1.DaemonSet, batchv1.Job)",
 			ErrUnsupportedObjectType, target)
 	}
 }
