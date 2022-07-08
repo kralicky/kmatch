@@ -1263,3 +1263,45 @@ func HaveTolerations(tolerationsOrKeys ...interface{}) gtypes.GomegaMatcher {
 	}
 	return matcher
 }
+
+type LimitMatcher struct {
+	Limits interface{}
+}
+
+func (o LimitMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case corev1.Container:
+		switch l := o.Limits.(type) {
+		case corev1.ResourceList:
+			return reflect.DeepEqual(l, t.Resources.Limits), nil
+		case string:
+			_, ok := t.Resources.Limits[corev1.ResourceName(l)]
+			return ok, nil
+		default:
+			panic("shouldn't get here")
+		}
+	default:
+		return false, fmt.Errorf(
+			"%w %T in LimitMatcher (allowed types: corev1.Container)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (o LimitMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have a matching limit"
+}
+
+func (o LimitMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have a matching limit"
+}
+
+func HaveLimits(limitTypeOrSpec interface{}) gtypes.GomegaMatcher {
+	matcher := &LimitMatcher{}
+	switch l := limitTypeOrSpec.(type) {
+	case corev1.ResourceList, string:
+		matcher.Limits = l
+	default:
+		panic("Have limits requires string or corev1.ResourceList arguments")
+	}
+	return matcher
+}

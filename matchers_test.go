@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 )
@@ -41,6 +42,12 @@ var _ = Describe("Matchers", func() {
 								Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
 								Env:          []corev1.EnvVar{{Name: "FOO", Value: "BAR"}},
 								VolumeMounts: []corev1.VolumeMount{{Name: "foo", MountPath: "/foo"}},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("500m"),
+										corev1.ResourceMemory: resource.MustParse("2Gi"),
+									},
+								},
 							},
 						},
 						Volumes: []corev1.Volume{
@@ -89,6 +96,11 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo"),
+				HaveLimits("cpu"),
+				HaveLimits(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}),
 			)),
 			HaveTolerations("foo", corev1.Toleration{
 				Key:      "bar",
@@ -127,6 +139,12 @@ var _ = Describe("Matchers", func() {
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: "foo", MountPath: "/foo"},
 									{Name: "bar", MountPath: "/bar"},
+								},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("500m"),
+										corev1.ResourceMemory: resource.MustParse("2Gi"),
+									},
 								},
 							},
 						},
@@ -195,6 +213,11 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo", "bar"),
+				HaveLimits("cpu"),
+				HaveLimits(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}),
 			)),
 			HaveMatchingVolume(And(
 				HaveName("foo"),
@@ -242,6 +265,12 @@ var _ = Describe("Matchers", func() {
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: "foo", MountPath: "/foo"},
 									{Name: "bar", MountPath: "/bar"},
+								},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("500m"),
+										corev1.ResourceMemory: resource.MustParse("2Gi"),
+									},
 								},
 							},
 						},
@@ -292,6 +321,11 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo", "bar"),
+				HaveLimits("cpu"),
+				HaveLimits(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}),
 			)),
 			HaveMatchingVolume(And(
 				HaveName("foo"),
@@ -347,6 +381,12 @@ var _ = Describe("Matchers", func() {
 								Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
 								Env:          []corev1.EnvVar{{Name: "FOO", Value: "BAR"}},
 								VolumeMounts: []corev1.VolumeMount{{Name: "foo", MountPath: "/foo"}},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("500m"),
+										corev1.ResourceMemory: resource.MustParse("2Gi"),
+									},
+								},
 							},
 						},
 						Volumes: []corev1.Volume{
@@ -393,6 +433,11 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo"),
+				HaveLimits("cpu"),
+				HaveLimits(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}),
 			)),
 			HaveTolerations("foo", corev1.Toleration{
 				Key:      "bar",
@@ -418,6 +463,12 @@ var _ = Describe("Matchers", func() {
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "foo", MountPath: "/foo"},
 							{Name: "bar", MountPath: "/bar"},
+						},
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("500m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
 						},
 					},
 				},
@@ -466,6 +517,11 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv("FOO", "BAR"),
 				HaveVolumeMounts("foo", "bar"),
+				HaveLimits("cpu"),
+				HaveLimits(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				}),
 			)),
 			HaveMatchingVolume(And(
 				HaveName("foo"),
