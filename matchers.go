@@ -653,23 +653,65 @@ func HaveMatchingContainer(matcher gtypes.GomegaMatcher) gtypes.GomegaMatcher {
 }
 
 type EnvVarMatcher struct {
-	KeysAndValues map[string]*string
+	KeysAndValues map[string]interface{}
 }
 
 func (o EnvVarMatcher) Match(target interface{}) (success bool, err error) {
-	envVars := map[string]string{}
+	envVarStrings := map[string]string{}
+	envVarValueFrom := map[string]*corev1.EnvVarSource{}
 	switch t := target.(type) {
 	case corev1.Container:
 		for _, env := range t.Env {
-			envVars[env.Name] = env.Value
+			if env.Value != "" {
+				envVarStrings[env.Name] = env.Value
+			} else {
+				envVarValueFrom[env.Name] = env.ValueFrom
+			}
 		}
 		for k, v := range o.KeysAndValues {
-			if envValue, ok := envVars[k]; ok {
-				if v != nil && envValue != *v {
+			if v == nil {
+				if _, ok := envVarStrings[k]; !ok {
 					return false, nil
 				}
-			} else {
-				return false, nil
+				if _, ok := envVarValueFrom[k]; !ok {
+					return false, nil
+				}
+			}
+			switch val := v.(type) {
+			case corev1.SecretKeySelector:
+				if envValue, ok := envVarValueFrom[k]; ok {
+					if envValue.SecretKeyRef == nil {
+						return false, nil
+					}
+					if val.Name != envValue.SecretKeyRef.Name || val.Key != envValue.SecretKeyRef.Key {
+						return false, nil
+					}
+				} else {
+					return false, nil
+				}
+			case corev1.ConfigMapKeySelector:
+				if envValue, ok := envVarValueFrom[k]; ok {
+					if envValue.ConfigMapKeyRef == nil {
+						return false, nil
+					}
+					if val.Name != envValue.ConfigMapKeyRef.Name || val.Key != envValue.ConfigMapKeyRef.Key {
+						return false, nil
+					}
+				} else {
+					return false, nil
+				}
+			case string:
+				if envValue, ok := envVarStrings[k]; ok {
+					if envValue != val {
+						return false, nil
+					}
+				} else {
+					return false, nil
+				}
+			default:
+				return false, fmt.Errorf(
+					"%w %T in EnvVarMatcher (allowed values: string, corev1.SecretKeyRef, or corev1.ConfigMapKeyRef)",
+					ErrUnsupportedObjectType, target)
 			}
 		}
 		return true, nil
@@ -689,10 +731,10 @@ func (o EnvVarMatcher) NegatedFailureMessage(target interface{}) (message string
 }
 
 // keysAndValues should alternate between key names (string) and values which
-// could be any string-convertible type or nil, indicating any value is allowed.
+// could be any string-convertible type, a SecretKeySelector or ConfigMapSelector, or nil, indicating any value is allowed.
 func HaveEnv(keysAndValues ...interface{}) gtypes.GomegaMatcher {
 	matcher := &EnvVarMatcher{
-		KeysAndValues: make(map[string]*string),
+		KeysAndValues: make(map[string]interface{}),
 	}
 	for i := 0; i < len(keysAndValues); i += 2 {
 		key, ok := keysAndValues[i].(string)
@@ -702,7 +744,7 @@ func HaveEnv(keysAndValues ...interface{}) gtypes.GomegaMatcher {
 		if v := keysAndValues[i+1]; v == nil {
 			matcher.KeysAndValues[key] = nil
 		} else {
-			matcher.KeysAndValues[key] = pointer.String(fmt.Sprint(v))
+			matcher.KeysAndValues[key] = v
 		}
 	}
 	return matcher

@@ -459,7 +459,34 @@ var _ = Describe("Matchers", func() {
 						Name:  "foo",
 						Image: "someimage",
 						Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
-						Env:   []corev1.EnvVar{{Name: "FOO", Value: "BAR"}},
+						Env: []corev1.EnvVar{
+							{
+								Name:  "FOO",
+								Value: "BAR",
+							},
+							{
+								Name: "BAZ",
+								ValueFrom: &corev1.EnvVarSource{
+									SecretKeyRef: &corev1.SecretKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "BAZ",
+										},
+										Key: "BAT",
+									},
+								},
+							},
+							{
+								Name: "LOREM",
+								ValueFrom: &corev1.EnvVarSource{
+									ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "LOREM",
+										},
+										Key: "IPSUM",
+									},
+								},
+							},
+						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "foo", MountPath: "/foo"},
 							{Name: "bar", MountPath: "/bar"},
@@ -515,7 +542,24 @@ var _ = Describe("Matchers", func() {
 			HaveMatchingContainer(And(
 				HaveName("foo"),
 				HavePorts(8080),
-				HaveEnv("FOO", "BAR"),
+				HaveEnv(
+					"FOO",
+					"BAR",
+					"BAZ",
+					corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "BAZ",
+						},
+						Key: "BAT",
+					},
+					"LOREM",
+					corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "LOREM",
+						},
+						Key: "IPSUM",
+					},
+				),
 				HaveVolumeMounts("foo", "bar"),
 				HaveLimits("cpu"),
 				HaveLimits(corev1.ResourceList{
