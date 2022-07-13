@@ -544,7 +544,7 @@ var _ = Describe("Matchers", func() {
 				HavePorts(8080),
 				HaveEnv(
 					"FOO",
-					"BAR",
+					nil,
 					"BAZ",
 					corev1.SecretKeySelector{
 						LocalObjectReference: corev1.LocalObjectReference{

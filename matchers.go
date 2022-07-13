@@ -670,12 +670,13 @@ func (o EnvVarMatcher) Match(target interface{}) (success bool, err error) {
 		}
 		for k, v := range o.KeysAndValues {
 			if v == nil {
-				if _, ok := envVarStrings[k]; !ok {
-					return false, nil
+				if _, ok := envVarStrings[k]; ok {
+					continue
 				}
-				if _, ok := envVarValueFrom[k]; !ok {
-					return false, nil
+				if _, ok := envVarValueFrom[k]; ok {
+					continue
 				}
+				return false, nil
 			}
 			switch val := v.(type) {
 			case corev1.SecretKeySelector:
