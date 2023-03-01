@@ -32,10 +32,10 @@ var defaultObjectClient client.Client
 // The client argument is optional. If it is not provided, a default client
 // must be set previously using SetDefaultObjectClient.
 // As a special case, the IsNotFound error is ignored.
-func Object(
-	obj client.Object,
+func Object[T client.Object](
+	obj T,
 	optionalClient ...client.Client,
-) func() (client.Object, error) {
+) func() (T, error) {
 	var c client.Client
 	if len(optionalClient) > 0 {
 		c = optionalClient[0]
@@ -45,13 +45,15 @@ func Object(
 		}
 		c = defaultObjectClient
 	}
-	return func() (client.Object, error) {
-		copied := obj.DeepCopyObject().(client.Object)
-		err := c.Get(context.Background(), client.ObjectKeyFromObject(obj), copied)
+	key := client.ObjectKeyFromObject(obj)
+	typ := reflect.TypeOf(obj).Elem()
+	return func() (T, error) {
+		t := reflect.New(typ).Interface().(T)
+		err := c.Get(context.Background(), key, t)
 		if apierrors.IsNotFound(err) {
-			return nil, nil
+			err = nil
 		}
-		return copied, err
+		return t, err
 	}
 }
 
@@ -69,15 +71,16 @@ func List(
 		}
 		c = defaultObjectClient
 	}
+	typ := reflect.TypeOf(list).Elem()
 	return func() ([]client.Object, error) {
-		copied := list.DeepCopyObject().(client.ObjectList)
-		err := c.List(context.Background(), copied, opts)
+		t := reflect.New(typ).Interface().(client.ObjectList)
+		err := c.List(context.Background(), t, opts)
 		if err != nil {
 			return nil, err
 		}
 		// convert client.ObjectList to []client.Object
 		ret := []client.Object{}
-		items := reflect.ValueOf(copied).Elem().FieldByName("Items")
+		items := reflect.ValueOf(t).Elem().FieldByName("Items")
 		for i := 0; i < items.Len(); i++ {
 			ret = append(ret, items.Index(i).Addr().Interface().(client.Object))
 		}
