@@ -349,6 +349,37 @@ func HaveLabels(keysAndValues ...string) gtypes.GomegaMatcher {
 	return lm
 }
 
+type AnnotationMatcher struct {
+	annotations map[string]string
+}
+
+func (o AnnotationMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have annotations " + fmt.Sprint(o.annotations)
+}
+
+func (o AnnotationMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have annotations " + fmt.Sprint(o.annotations)
+}
+
+func (o AnnotationMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case metav1.Object:
+		return isSubset(o.annotations, t.GetAnnotations()), nil
+	default:
+		return false, fmt.Errorf(
+			"%w %T in AnnotationMatcher (allowed types: any metav1.Object)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func HaveAnnotations(keysAndValues ...string) gtypes.GomegaMatcher {
+	lm := &AnnotationMatcher{annotations: make(map[string]string)}
+	for i := 0; i < len(keysAndValues); i += 2 {
+		lm.annotations[keysAndValues[i]] = keysAndValues[i+1]
+	}
+	return lm
+}
+
 type ReplicaCountMatcher struct {
 	ReplicaCount int32
 }

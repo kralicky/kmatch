@@ -17,9 +17,10 @@ var _ = Describe("Matchers", func() {
 	It("should match deployments", func() {
 		deployment := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels:    map[string]string{"app": "foo"},
+				Name:        "foo",
+				Namespace:   "bar",
+				Labels:      map[string]string{"app": "foo"},
+				Annotations: map[string]string{"foo": "app"},
 			},
 			Spec: appsv1.DeploymentSpec{
 				Replicas: pointer.Int32(50),
@@ -82,6 +83,8 @@ var _ = Describe("Matchers", func() {
 			Not(HaveNamespace("baz")),
 			HaveLabels("app", "foo"),
 			Not(HaveLabels("app", "bar")),
+			HaveAnnotations("foo", "app"),
+			Not(HaveAnnotations("app", "foo")),
 			HaveReplicaCount(50),
 			Not(HaveReplicaCount(100)),
 			HaveMatchingVolume(And(
@@ -112,9 +115,10 @@ var _ = Describe("Matchers", func() {
 	It("should match statefulsets", func() {
 		statefulSet := &appsv1.StatefulSet{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels:    map[string]string{"app": "foo"},
+				Name:        "foo",
+				Namespace:   "bar",
+				Labels:      map[string]string{"app": "foo"},
+				Annotations: map[string]string{"foo": "app"},
 			},
 			Spec: appsv1.StatefulSetSpec{
 				Replicas: pointer.Int32(50),
@@ -206,6 +210,8 @@ var _ = Describe("Matchers", func() {
 			Not(HaveNamespace("baz")),
 			HaveLabels("app", "foo"),
 			Not(HaveLabels("app", "bar")),
+			HaveAnnotations("foo", "app"),
+			Not(HaveAnnotations("app", "foo")),
 			HaveReplicaCount(50),
 			Not(HaveReplicaCount(100)),
 			HaveMatchingContainer(And(
@@ -239,9 +245,10 @@ var _ = Describe("Matchers", func() {
 	It("should match daemonsets", func() {
 		daemonset := &appsv1.DaemonSet{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels:    map[string]string{"app": "foo"},
+				Name:        "foo",
+				Namespace:   "bar",
+				Labels:      map[string]string{"app": "foo"},
+				Annotations: map[string]string{"foo": "app"},
 			},
 			Spec: appsv1.DaemonSetSpec{
 				Selector: &metav1.LabelSelector{
@@ -316,6 +323,8 @@ var _ = Describe("Matchers", func() {
 			HaveNamespace("bar"),
 			HaveLabels("app", "foo"),
 			Not(HaveLabels("app", "bar")),
+			HaveAnnotations("foo", "app"),
+			Not(HaveAnnotations("app", "foo")),
 			HaveMatchingContainer(And(
 				HaveName("foo"),
 				HavePorts(8080),
@@ -357,9 +366,10 @@ var _ = Describe("Matchers", func() {
 	It("should match jobs", func() {
 		job := &batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels:    map[string]string{"app": "foo"},
+				Name:        "foo",
+				Namespace:   "bar",
+				Labels:      map[string]string{"app": "foo"},
+				Annotations: map[string]string{"foo": "app"},
 			},
 			Spec: batchv1.JobSpec{
 				Selector: &metav1.LabelSelector{
@@ -421,6 +431,8 @@ var _ = Describe("Matchers", func() {
 			Not(HaveNamespace("baz")),
 			HaveLabels("app", "foo"),
 			Not(HaveLabels("app", "bar")),
+			HaveAnnotations("foo", "app"),
+			Not(HaveAnnotations("app", "foo")),
 			HaveMatchingVolume(And(
 				HaveName("foo"),
 				HaveVolumeSource("EmptyDir"),
@@ -449,9 +461,10 @@ var _ = Describe("Matchers", func() {
 	It("should match pods", func() {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels:    map[string]string{"app": "foo"},
+				Name:        "foo",
+				Namespace:   "bar",
+				Labels:      map[string]string{"app": "foo"},
+				Annotations: map[string]string{"foo": "app"},
 			},
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{
@@ -539,6 +552,8 @@ var _ = Describe("Matchers", func() {
 			HaveNamespace("bar"),
 			HaveLabels("app", "foo"),
 			Not(HaveLabels("app", "bar")),
+			HaveAnnotations("foo", "app"),
+			Not(HaveAnnotations("app", "foo")),
 			HaveMatchingContainer(And(
 				HaveName("foo"),
 				HavePorts(8080),
