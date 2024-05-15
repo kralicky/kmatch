@@ -1382,3 +1382,185 @@ func HaveLimits(limitTypeOrSpec interface{}) gtypes.GomegaMatcher {
 	}
 	return matcher
 }
+
+// RolloutMatcher is a Gomega matcher that checks if a deployment, statefulset, or daemonset has completed its rollout.
+//
+// !! Warning: This is a runtime matcher, requires a running control plane to correctly match the rollout status
+//
+// Reference : https://github.com/kubernetes/kubectl/blob/master/pkg/polymorphichelpers/rollout_status.go
+type RolloutMatcher struct{}
+
+// Reference https://github.com/kubernetes/kubectl/blob/5b7c8b24b4361a97ab19de1d1e301a6c1bbaed1a/pkg/polymorphichelpers/rollout_status.go#L59
+func matchDeployRollout(d *appsv1.Deployment) (success bool, reason string, err error) {
+	if d.Generation <= d.Status.ObservedGeneration {
+		return false,
+			"Waiting for deployment spec update to be observed...\n",
+			nil
+	}
+
+	if pointer.Int32Deref(d.Spec.Replicas, 1) < d.Status.UpdatedReplicas {
+		return false,
+			fmt.Sprintf(
+				"Waiting for deployment %q rollout to finish: %d out of %d new replicas have been updated...\n",
+				d.Name,
+				d.Status.UpdatedReplicas,
+				*d.Spec.Replicas,
+			),
+			nil
+	}
+	if d.Spec.Replicas != nil && *d.Spec.Replicas > d.Status.Replicas {
+		return false,
+			fmt.Sprintf(
+				"Waiting for deployment %q rollout to finish: %d old replicas are pending termination...\n",
+				d.Name,
+				d.Status.Replicas-d.Status.UpdatedReplicas,
+			),
+			nil
+	}
+	if d.Status.AvailableReplicas < d.Status.UpdatedReplicas {
+		return false,
+			fmt.Sprintf(
+				"Waiting for deployment %q rollout to finish: %d of %d updated replicas are available...\n",
+				d.Name,
+				d.Status.AvailableReplicas,
+				d.Status.UpdatedReplicas,
+			), nil
+	}
+	return true, fmt.Sprintf("deployment %q successfully rolled out\n", d.Name), nil
+}
+
+// Reference : https://github.com/kubernetes/kubectl/blob/5b7c8b24b4361a97ab19de1d1e301a6c1bbaed1a/pkg/polymorphichelpers/rollout_status.go#L120
+func matchStatefulRollout(ss *appsv1.StatefulSet) (success bool, reason string, err error) {
+	if ss.Spec.UpdateStrategy.Type != appsv1.RollingUpdateStatefulSetStrategyType {
+		return false, "", fmt.Errorf("rollout status is only available for %s strategy type", appsv1.RollingUpdateStatefulSetStrategyType)
+	}
+	if ss.Status.ObservedGeneration == 0 || ss.Generation > ss.Status.ObservedGeneration {
+		return false,
+			"Waiting for statefulset spec update to be observed...\n",
+			nil
+	}
+
+	if ss.Spec.Replicas != nil && ss.Status.ReadyReplicas < *ss.Spec.Replicas {
+		return false,
+			fmt.Sprintf(
+				"Waiting for %d pods to be ready...\n",
+				*ss.Spec.Replicas-ss.Status.ReadyReplicas,
+			),
+			nil
+	}
+	if ss.Spec.UpdateStrategy.Type == appsv1.RollingUpdateStatefulSetStrategyType && ss.Spec.UpdateStrategy.RollingUpdate != nil {
+		if ss.Spec.Replicas != nil && ss.Spec.UpdateStrategy.RollingUpdate.Partition != nil {
+			if ss.Status.UpdatedReplicas < (*ss.Spec.Replicas - *ss.Spec.UpdateStrategy.RollingUpdate.Partition) {
+				return false,
+					fmt.Sprintf(
+						"Waiting for partitioned roll out to finish: %d out of %d new pods have been updated...\n",
+						ss.Status.UpdatedReplicas, *ss.Spec.Replicas-*ss.Spec.UpdateStrategy.RollingUpdate.Partition),
+					nil
+			}
+		}
+		return true,
+			fmt.Sprintf(
+				"partitioned roll out complete: %d new pods have been updated...\n",
+				ss.Status.UpdatedReplicas,
+			),
+			nil
+	}
+	if ss.Status.UpdateRevision != ss.Status.CurrentRevision {
+		return false,
+			fmt.Sprintf(
+				"waiting for statefulset rolling update to complete %d pods at revision %s...\n",
+				ss.Status.UpdatedReplicas,
+				ss.Status.UpdateRevision,
+			), nil
+	}
+	return true,
+		fmt.Sprintf(
+			"statefulset rolling update complete %d pods at revision %s...\n",
+			ss.Status.CurrentReplicas,
+			ss.Status.CurrentRevision,
+		),
+		nil
+}
+
+// Reference : https://github.com/kubernetes/kubectl/blob/5b7c8b24b4361a97ab19de1d1e301a6c1bbaed1a/pkg/polymorphichelpers/rollout_status.go#L95
+func matchDaemonRollout(ds *appsv1.DaemonSet) (success bool, reason string, err error) {
+	if ds.Spec.UpdateStrategy.Type != appsv1.RollingUpdateDaemonSetStrategyType {
+		return false,
+			"",
+			fmt.Errorf("rollout status is only available for %s strategy type", appsv1.RollingUpdateStatefulSetStrategyType)
+	}
+	if ds.Generation > ds.Status.ObservedGeneration {
+		return false,
+			"Waiting for daemon set spec update to be observed...\n",
+			nil
+
+	}
+	if ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
+		return false,
+			fmt.Sprintf(
+				"Waiting for daemon set %q rollout to finish: %d out of %d new pods have been updated...\n",
+				ds.Name,
+				ds.Status.UpdatedNumberScheduled,
+				ds.Status.DesiredNumberScheduled,
+			),
+			nil
+	}
+	if ds.Status.NumberAvailable < ds.Status.DesiredNumberScheduled {
+		return false, fmt.Sprintf(
+			"Waiting for daemon set %q rollout to finish: %d of %d updated pods are available...\n",
+			ds.Name,
+			ds.Status.NumberAvailable,
+			ds.Status.DesiredNumberScheduled,
+		), nil
+	}
+	return true, fmt.Sprintf("daemon set %q successfully rolled out\n", ds.Name), nil
+}
+
+func handleRolloutTypeMessage(target interface{}) string {
+	var info string
+	switch t := target.(type) {
+	case *appsv1.Deployment:
+		_, reason, _ := matchDeployRollout(t)
+		info = reason
+	case *appsv1.StatefulSet:
+		_, reason, _ := matchStatefulRollout(t)
+		info = reason
+	case *appsv1.DaemonSet:
+		_, reason, _ := matchDaemonRollout(t)
+		info = reason
+	default:
+	}
+	return info
+}
+
+func (o RolloutMatcher) FailureMessage(target interface{}) (message string) {
+	info := handleRolloutTypeMessage(target)
+	return "expected " + target.(client.Object).GetName() + " to have a successful rollout : " + info
+}
+
+func (o RolloutMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	info := handleRolloutTypeMessage(target)
+	return "expected " + target.(client.Object).GetName() + " not to have a successful rollout : " + info
+}
+
+func (o RolloutMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case *appsv1.Deployment:
+		success, _, err := matchDeployRollout(t)
+		return success, err
+	case *appsv1.StatefulSet:
+		success, _, err := matchStatefulRollout(t)
+		return success, err
+	case *appsv1.DaemonSet:
+		success, _, err := matchDaemonRollout(t)
+		return success, err
+	default:
+		return false, fmt.Errorf("%w %T in ReplicaCountMatcher (allowed types: *appsv1.Deployment, *appsv1.StatefulSet, *appsv1.DaemonSet)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func HaveSuccessfulRollout() gtypes.GomegaMatcher {
+	rm := &RolloutMatcher{}
+	return rm
+}
