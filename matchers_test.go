@@ -602,9 +602,9 @@ var _ = Describe("Matchers", func() {
 
 	When("we match workload rollouts", func() {
 		It("should match deployment rollout status", func() {
-			By("verifying an empty spec does not have a successful rollout")
+			By("verifying an empty spec has a successful rollout")
 			deploy := &appsv1.Deployment{}
-			Expect(deploy).NotTo(HaveSuccessfulRollout())
+			Expect(deploy).To(HaveSuccessfulRollout())
 
 			By("verifying a deployment with minimal criteria for a successful rollout")
 			deployRollout := &appsv1.Deployment{
@@ -613,7 +613,7 @@ var _ = Describe("Matchers", func() {
 					Generation: 2,
 				},
 				Status: appsv1.DeploymentStatus{
-					ObservedGeneration: 1,
+					ObservedGeneration: 2,
 				},
 			}
 			Expect(deployRollout).To(HaveSuccessfulRollout())
@@ -635,6 +635,9 @@ var _ = Describe("Matchers", func() {
 					AvailableReplicas:  0,
 				},
 			}
+			deployReplica.Status.ObservedGeneration = 2
+			Expect(deployReplica).NotTo(HaveSuccessfulRollout())
+
 			Expect(deployReplica).NotTo(HaveSuccessfulRollout())
 			deployReplica.Spec.Replicas = pointer.Int32(expectedReplicas)
 			Expect(deployReplica).NotTo(

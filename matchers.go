@@ -1392,7 +1392,7 @@ type RolloutMatcher struct{}
 
 // Reference https://github.com/kubernetes/kubectl/blob/5b7c8b24b4361a97ab19de1d1e301a6c1bbaed1a/pkg/polymorphichelpers/rollout_status.go#L59
 func matchDeployRollout(d *appsv1.Deployment) (success bool, reason string, err error) {
-	if d.Generation <= d.Status.ObservedGeneration {
+	if d.Generation > d.Status.ObservedGeneration {
 		return false,
 			"Waiting for deployment spec update to be observed...\n",
 			nil
