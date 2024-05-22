@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"emperror.dev/errors"
@@ -17,8 +18,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/util/jsonpath"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -1589,6 +1593,178 @@ func GVK(
 		}
 		return mapping, err
 	}
+}
+
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L249
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L624
+type jsonPathMatcher struct {
+	matchAnyValue  bool
+	jsonPathValue  string
+	jsonPath       string
+	jsonPathParser *jsonpath.JSONPath
+	outErr         error
+}
+
+// HaveJsonPath is a Gomega matcher that mirrors the (extended) behvaiour of jsonpath on unstructured objects
+func HaveJsonPath(jsonPath string, optionalValue ...string) gtypes.GomegaMatcher {
+	relaxedPathExpr, err := newJSONPathParser(jsonPath)
+	m := jsonPathMatcher{
+		matchAnyValue:  true,
+		jsonPath:       jsonPath,
+		jsonPathParser: relaxedPathExpr,
+		outErr:         err,
+	}
+	if len(optionalValue) > 0 && optionalValue[0] != "" {
+		m.matchAnyValue = false
+		m.jsonPathValue = optionalValue[0]
+	}
+	return m
+}
+
+func (j jsonPathMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case client.Object:
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(t)
+		if err != nil {
+			return false, err
+		}
+		unstructuredObj := &unstructured.Unstructured{Object: objMap}
+		return j.checkCondition(unstructuredObj)
+	default:
+		return false, fmt.Errorf(
+			"%w %T in JsonPathMatcher (allowed types: any client.Object)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func (j jsonPathMatcher) FailureMessage(target interface{}) (message string) {
+	path := fmt.Sprintf("expected json path : %s ", j.jsonPath)
+	var match string
+	if j.matchAnyValue {
+		match = "to exist"
+	} else {
+		match = fmt.Sprintf("to have value : %s", j.jsonPathValue)
+	}
+	obj := "on " + target.(client.Object).GetName()
+	return path + match + obj
+}
+
+func (j jsonPathMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	path := fmt.Sprintf("expected json path : %s ", j.jsonPath)
+	var match string
+	if j.matchAnyValue {
+		match = "not to exist"
+	} else {
+		match = fmt.Sprintf("not to have value : %s", j.jsonPathValue)
+	}
+	obj := "on " + target.(client.Object).GetName()
+	return path + match + obj
+}
+
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L659
+func (j jsonPathMatcher) checkCondition(obj *unstructured.Unstructured) (bool, error) {
+	queryObj := obj.UnstructuredContent()
+	parseResults, err := j.jsonPathParser.FindResults(queryObj)
+	if err != nil {
+		return false, err
+	}
+	if len(parseResults) == 0 || len(parseResults[0]) == 0 {
+		return false, nil
+	}
+	if err := verifyParsedJSONPath(parseResults); err != nil {
+		return false, err
+	}
+	if j.matchAnyValue {
+		return true, nil
+	}
+	isConditionMet, err := compareResults(parseResults[0][0], j.jsonPathValue)
+	if err != nil {
+		return false, err
+	}
+	return isConditionMet, nil
+}
+
+// compareResults will compare the reflect.Value from the result parsed by the
+// JSONPath parser with the expected value given by the value
+//
+// Since this is coming from an unstructured this can only ever be a primitive,
+// map[string]interface{}, or []interface{}.
+// We do not support the last two and rely on fmt to handle conversion to string
+// and compare the result with user input
+//
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L700
+func compareResults(r reflect.Value, expectedVal string) (bool, error) {
+	switch r.Interface().(type) {
+	case map[string]interface{}, []interface{}:
+		return false, errors.New("jsonpath leads to a nested object or list which is not supported")
+	}
+	s := fmt.Sprintf("%v", r.Interface())
+	return strings.TrimSpace(s) == strings.TrimSpace(expectedVal), nil
+}
+
+// verifyParsedJSONPath verifies the JSON received from the API server is valid.
+// It will only accept a single JSON
+//
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L683
+func verifyParsedJSONPath(results [][]reflect.Value) error {
+	if len(results) > 1 {
+		return errors.New("given jsonpath expression matches more than one list")
+	}
+	if len(results[0]) > 1 {
+		return errors.New("given jsonpath expression matches more than one value")
+	}
+	return nil
+}
+
+var jsonRegexp = regexp.MustCompile(`^\{\.?([^{}]+)\}$|^\.?([^{}]+)$`)
+
+// RelaxedJSONPathExpression attempts to be flexible with JSONPath expressions, it accepts:
+//   - metadata.name (no leading '.' or curly braces '{...}'
+//   - {metadata.name} (no leading '.')
+//   - .metadata.name (no curly braces '{...}')
+//   - {.metadata.name} (complete expression)
+//
+// And transforms them all into a valid jsonpath expression:
+//
+//	{.metadata.name}
+//
+// Reference : https://github.com/kubernetes/kubectl/blob/8e2918ab8b051742ab02f518662704e522b8d3c2/pkg/cmd/get/customcolumn.go#L49
+func relaxedJSONPathExpression(pathExpression string) (string, error) {
+	if len(pathExpression) == 0 {
+		return pathExpression, nil
+	}
+	submatches := jsonRegexp.FindStringSubmatch(pathExpression)
+	if submatches == nil {
+		return "", fmt.Errorf("unexpected path string, expected a 'name1.name2' or '.name1.name2' or '{name1.name2}' or '{.name1.name2}'")
+	}
+	if len(submatches) != 3 {
+		return "", fmt.Errorf("unexpected submatch list: %v", submatches)
+	}
+	var fieldSpec string
+	if len(submatches[1]) != 0 {
+		fieldSpec = submatches[1]
+	} else {
+		fieldSpec = submatches[2]
+	}
+	return fmt.Sprintf("{.%s}", fieldSpec), nil
+}
+
+// Matches the functionality of kubectl's jsonpath parsing
+//
+// Reference : https://github.com/kubernetes/kubectl/blob/1b4373f26bf86a739d8355d83d34f6317bb305c4/pkg/cmd/wait/wait.go#L236
+func newJSONPathParser(jsonPathExpression string) (*jsonpath.JSONPath, error) {
+	j := jsonpath.New("kmatch").AllowMissingKeys(true)
+	if jsonPathExpression == "" {
+		return nil, errors.New("jsonpath expression cannot be empty")
+	}
+	relaxedExpr, err := relaxedJSONPathExpression(jsonPathExpression)
+	if err != nil {
+		return nil, err
+	}
+	if err := j.Parse(relaxedExpr); err != nil {
+		return nil, err
+	}
+	return j, nil
 }
 
 type FinalizerMatcher struct {
