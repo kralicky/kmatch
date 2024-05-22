@@ -14,7 +14,9 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,6 +29,16 @@ var (
 
 var defaultObjectClient client.Client
 
+func defaultClientOr(optionalClient ...client.Client) client.Client {
+	if len(optionalClient) > 0 {
+		return optionalClient[0]
+	}
+	if defaultObjectClient == nil {
+		panic("default client is not set - use SetDefaultObjectClient to set a default client")
+	}
+	return defaultObjectClient
+}
+
 // Object returns a function that will look up the object with the given name
 // and namespace in the cluster using the provided client.
 // The client argument is optional. If it is not provided, a default client
@@ -36,15 +48,7 @@ func Object[T client.Object](
 	obj T,
 	optionalClient ...client.Client,
 ) func() (T, error) {
-	var c client.Client
-	if len(optionalClient) > 0 {
-		c = optionalClient[0]
-	} else {
-		if defaultObjectClient == nil {
-			panic("default client is not set - use SetDefaultObjectClient to set a default client")
-		}
-		c = defaultObjectClient
-	}
+	c := defaultClientOr(optionalClient...)
 	key := client.ObjectKeyFromObject(obj)
 	typ := reflect.TypeOf(obj).Elem()
 	return func() (T, error) {
@@ -108,6 +112,12 @@ func (o ExistenceMatcher) Match(target interface{}) (success bool, err error) {
 	if obj, ok := target.(client.Object); ok {
 		return obj.GetCreationTimestamp() != metav1.Time{} &&
 			obj.GetDeletionTimestamp() == nil, nil
+	}
+	if mapping, ok := target.(*meta.RESTMapping); ok {
+		return mapping != nil &&
+			mapping.GroupVersionKind.Group != "" &&
+			mapping.GroupVersionKind.Version != "" &&
+			mapping.GroupVersionKind.Kind != "", nil
 	}
 	return false, fmt.Errorf("error in ExistenceMatcher: %w", ErrNotAClientObject)
 }
@@ -1563,4 +1573,19 @@ func (o RolloutMatcher) Match(target interface{}) (success bool, err error) {
 func HaveSuccessfulRollout() gtypes.GomegaMatcher {
 	rm := &RolloutMatcher{}
 	return rm
+}
+
+func GVK(
+	gvk schema.GroupVersionKind,
+	optionalClient ...client.Client,
+) func() (*meta.RESTMapping, error) {
+	c := defaultClientOr(optionalClient...)
+	mapper := c.RESTMapper()
+	return func() (*meta.RESTMapping, error) {
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if meta.IsNoMatchError(err) {
+			return mapping, nil
+		}
+		return mapping, err
+	}
 }

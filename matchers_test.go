@@ -8,8 +8,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/pointer"
 )
 
@@ -598,6 +600,19 @@ var _ = Describe("Matchers", func() {
 			}),
 			Not(HaveTolerations("baz")),
 		))
+	})
+
+	It("should match meta.RESTMapping's", func() {
+		var m *meta.RESTMapping
+		Expect(m).NotTo(Exist())
+		m = &meta.RESTMapping{
+			GroupVersionKind: schema.GroupVersionKind{
+				Group:   "helm.cattle.io",
+				Version: "v1",
+				Kind:    "HelmChart",
+			},
+		}
+		Expect(m).To(Exist())
 	})
 
 	When("we match workload rollouts", func() {
