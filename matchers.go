@@ -1601,7 +1601,7 @@ func (m FinalizerMatcher) FailureMessage(target interface{}) (message string) {
 }
 
 func (m FinalizerMatcher) NegatedFailureMessage(target interface{}) (message string) {
-	return "expected " + target.(client.Object).GetName() + " not to have matchers: '" + strings.Join(m.Finalizers, ", ") + "'"
+	return "expected " + target.(client.Object).GetName() + " not to have finalizers: '" + strings.Join(m.Finalizers, ", ") + "'"
 }
 
 func (m FinalizerMatcher) Match(target interface{}) (success bool, err error) {
