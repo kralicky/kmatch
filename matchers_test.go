@@ -23,6 +23,7 @@ var _ = Describe("Matchers", func() {
 				Namespace:   "bar",
 				Labels:      map[string]string{"app": "foo"},
 				Annotations: map[string]string{"foo": "app"},
+				Finalizers:  []string{"foo", "bar"},
 			},
 			Spec: appsv1.DeploymentSpec{
 				Replicas: pointer.Int32(50),
@@ -112,6 +113,10 @@ var _ = Describe("Matchers", func() {
 				Operator: corev1.TolerationOpExists,
 			}),
 			Not(HaveTolerations("baz")),
+			HaveFinalizers("foo"),
+			Not(HaveFinalizers("fizz")),
+			ConsistOfFinalizers("foo", "bar"),
+			Not(ConsistOfFinalizers("foo", "bar", "fizz")),
 		))
 	})
 	It("should match statefulsets", func() {

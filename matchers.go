@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"emperror.dev/errors"
 
@@ -1588,4 +1589,35 @@ func GVK(
 		}
 		return mapping, err
 	}
+}
+
+type FinalizerMatcher struct {
+	Finalizers      []string
+	containsMatcher gtypes.GomegaMatcher
+}
+
+func (m FinalizerMatcher) FailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " to have finalizers: '" + strings.Join(m.Finalizers, ", ") + "'"
+}
+
+func (m FinalizerMatcher) NegatedFailureMessage(target interface{}) (message string) {
+	return "expected " + target.(client.Object).GetName() + " not to have finalizers: '" + strings.Join(m.Finalizers, ", ") + "'"
+}
+
+func (m FinalizerMatcher) Match(target interface{}) (success bool, err error) {
+	switch t := target.(type) {
+	case client.Object:
+		return m.containsMatcher.Match(t.GetFinalizers())
+	default:
+		return false, fmt.Errorf("%w %T in  (allowed types: client.Object)",
+			ErrUnsupportedObjectType, target)
+	}
+}
+
+func HaveFinalizers(finalizers ...string) gtypes.GomegaMatcher {
+	return &FinalizerMatcher{Finalizers: finalizers, containsMatcher: gomega.ContainElements(finalizers)}
+}
+
+func ConsistOfFinalizers(finalizers ...string) gtypes.GomegaMatcher {
+	return &FinalizerMatcher{Finalizers: finalizers, containsMatcher: gomega.ConsistOf(finalizers)}
 }
