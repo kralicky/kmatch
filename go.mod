@@ -5,7 +5,7 @@ go 1.22
 require (
 	emperror.dev/errors v0.8.1
 	github.com/onsi/ginkgo/v2 v2.17.3
-	github.com/onsi/gomega v1.33.0
+	github.com/onsi/gomega v1.33.1
 	k8s.io/api v0.26.2
 	k8s.io/apimachinery v0.26.2
 	k8s.io/utils v0.0.0-20230220204549-a5ecb0141aa5
