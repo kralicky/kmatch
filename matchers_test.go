@@ -784,4 +784,20 @@ var _ = Describe("Matchers", func() {
 			)
 		})
 	})
+
+	When("we match using JsonPath", func() {
+		It("should match on some standard kubernetes objects", func() {
+			deploy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "foo",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: pointer.Int32(3),
+				},
+			}
+			Expect(deploy).To(HaveJsonPath("spec.replicas", "3"))
+			Expect(deploy).NotTo(HaveJsonPath("spec.replicas", "2"))
+			Expect(deploy).NotTo(HaveJsonPath(".imaginary"))
+		})
+	})
 })
